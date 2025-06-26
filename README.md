@@ -3,3 +3,4 @@
 aws config file storage format: INI file
 read more: https://en.wikipedia.org/wiki/INI_file
 
+run with: eval $(./test3.py)
