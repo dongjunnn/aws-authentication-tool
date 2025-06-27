@@ -8,7 +8,8 @@ from os.path import expanduser
 from curtsies.fmtfuncs import red, bold, green, on_blue, yellow, cyan
 import boto3
 import binascii
-import sys # Import sys to access stderr and stdin
+import sys 
+from enquiries.error import SelectionAborted
 
 home = expanduser("~")
 config = configparser.ConfigParser()
@@ -17,12 +18,12 @@ config.read(awsCredFile)
 
 # Helper function to handle input prompts correctly when using eval
 def get_input(prompt):
-    print(prompt, end='', file=sys.stderr)
-    sys.stderr.flush()
-    return sys.stdin.readline().strip()
+    # print(prompt, end='')
+    # sys.stderr.flush()
+    # return sys.stdin.readline().strip()
+    return input(prompt).strip()
 
 def stage_main_menu():
-    # enquiries library writes its menu to stderr by default, so it's safe.
     menu = ["Activate Profile (Get Token)", "Add New Profile", "Remove Profile","Quit"]
     choice = enquiries.choose("Action:", menu)
     if choice == "Activate Profile (Get Token)":
@@ -37,18 +38,18 @@ def stage_main_menu():
 def stage_choose_user():
     users = config.sections()
     if not users:
-        print(red("No users found. Please add a user first."), file=sys.stderr)
+        print(red("No users found. Please add a user first."))
         return "main_menu"
     
     choice = enquiries.choose("Choose a user:", users)
     try:
         if choice:
-            print(f"You selected: {choice}", file=sys.stderr)
+            print(f"You selected: {choice}")
             mfa_serial_arn = config[choice]['mfa_serial_arn']
             token = config[choice]['mfa_token']
             totp = pyotp.TOTP(token).now()
             
-            print("Requesting temporary session token from AWS...", file=sys.stderr)
+            print("Requesting temporary session token from AWS...")
             session = boto3.Session(profile_name=choice)
             sts_client = session.client('sts')
             response = sts_client.get_session_token(
@@ -57,14 +58,18 @@ def stage_choose_user():
             )
             credentials = response['Credentials']
 
-            print(green("\nCredentials obtained successfully!"), file=sys.stderr)
-            print(f"Expiration: {credentials['Expiration']}", file=sys.stderr)
-            
+            print(green("\nCredentials obtained successfully!"))
+            print(f"Expiration: {credentials['Expiration']}")
+
+            # print(f"AccessKeyId: {credentials['AccessKeyId']}")
+            # print("TEST")
+            # print(f"SecretAccessKey: {credentials['SecretAccessKey']}")
+            # print(f"SessionToken: {credentials['SessionToken']}")
             os.environ['AWS_ACCESS_KEY_ID'] = credentials['AccessKeyId']
             os.environ['AWS_SECRET_ACCESS_KEY'] = credentials['SecretAccessKey']
             os.environ['AWS_SESSION_TOKEN'] = credentials['SessionToken']
             
-            temp_env_file = "/tmp/aws_env_vars.sh" # Or use tempfile module for robust temp file creation
+            temp_env_file = "/tmp/aws_env_vars888.sh" # Or use tempfile module for robust temp file creation
             with open(temp_env_file, 'w') as f:
                 f.write(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"\n")
                 f.write(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"\n")
@@ -77,14 +82,14 @@ def stage_choose_user():
         else:
             return "back"
     except Exception as e:
-        print(red("\nAn error occurred!"), file=sys.stderr)
-        print(red(f"Error: {e}"), file=sys.stderr)
+        print(red("\nAn error occurred!"))
+        print(red(f"Error: {e}"))
         return "main_menu"
     
 def stage_remove_user():
     users = config.sections()
     if not users:
-        print("No users found. Please add a user first.", file=sys.stderr)
+        print("No users found. Please add a user first.")
         return "back"
     
     choice = enquiries.choose("Choose a user to remove:", users)
@@ -95,24 +100,24 @@ def stage_remove_user():
             try:
                 with open(awsCredFile, 'w') as configfile:
                     config.write(configfile)
-                print(green(f"\nSuccess! Profile '{choice}' was removed from {awsCredFile}"), file=sys.stderr)
+                print(green(f"\nSuccess! Profile '{choice}' was removed from {awsCredFile}"))
             except Exception as e:
-                print(red(f"\nError writing to credentials file: {e}"), file=sys.stderr)
+                print(red(f"\nError writing to credentials file: {e}"))
         else:
-            print("Removal cancelled.", file=sys.stderr)
+            print("Removal cancelled.")
     return "back"
 
 def validate_credentials_directly(access_key, secret_key, mfa_serial=None, mfa_token_secret=None):
-    print(cyan("\nValidating credentials with AWS before saving..."), file=sys.stderr)
+    print(cyan("\nValidating credentials with AWS before saving..."))
     try:
         if not mfa_serial or not mfa_token_secret:
-            print(red("MFA Serial and Token are required for validation."), file=sys.stderr)
+            print(red("MFA Serial and Token are required for validation."))
             return False
 
         pyotp.TOTP(mfa_token_secret).now()
         totp = pyotp.TOTP(mfa_token_secret).now()
         
-        print("MFA secret key format is valid. Now checking with AWS...", file=sys.stderr)
+        print("MFA secret key format is valid. Now checking with AWS...")
         sts_client = boto3.client(
             'sts',
             aws_access_key_id=access_key,
@@ -123,22 +128,22 @@ def validate_credentials_directly(access_key, secret_key, mfa_serial=None, mfa_t
             TokenCode=totp,
             DurationSeconds=900 
         )
-        print(green("MFA credentials and token are valid!"), file=sys.stderr)
+        print(green("MFA credentials and token are valid!"))
         return True
 
     except binascii.Error:
-        print(red("\nValidation Failed: The MFA Token Secret is not a valid Base32 string."), file=sys.stderr)
+        print(red("\nValidation Failed: The MFA Token Secret is not a valid Base32 string."))
         return False
     except Exception as e:
-        print(red(f"\nValidation Failed: {e}"), file=sys.stderr)
+        print(red(f"\nValidation Failed: {e}"))
         return False
     
 def stage_add_user():
-    print("--- Add New AWS Profile ---", file=sys.stderr)
+    print("--- Add New AWS Profile ---")
     
     profile_name = get_input("Enter a unique name for this profile: ")
     if not profile_name:
-        print(red("\nProfile name cannot be empty."), file=sys.stderr)
+        print(red("\nProfile name cannot be empty."))
         get_input("Press Enter to return.")
         return "main_menu"
 
@@ -150,7 +155,7 @@ def stage_add_user():
         mfa_token = get_input("Enter MFA Token Secret: ")
     
     if not validate_credentials_directly(access_key, secret_key, mfa_serial, mfa_token):
-        print(red("\nCredentials could not be validated and were not saved."), file=sys.stderr)
+        print(red("\nCredentials could not be validated and were not saved."))
         get_input("Press Enter to return to the main menu...")
         return "main_menu"
         
@@ -163,9 +168,9 @@ def stage_add_user():
     try:
         with open(awsCredFile, 'w') as configfile:
             config.write(configfile)
-        print(green(f"\nSuccess! Profile '{profile_name}' was added to {awsCredFile}"), file=sys.stderr)
+        print(green(f"\nSuccess! Profile '{profile_name}' was added to {awsCredFile}"))
     except Exception as e:
-        print(red(f"\nError writing to credentials file: {e}"), file=sys.stderr)
+        print(red(f"\nError writing to credentials file: {e}"))
 
     get_input("Press Enter to return to the main menu...")
     return "main_menu"
@@ -182,7 +187,7 @@ def main():
         elif current_stage == "Add New Profile":
             next_stage = stage_add_user()
         elif current_stage == 'Quit':
-            print("\nThanks for using this tool! Buy me a coffee!☕", file=sys.stderr)
+            print("\nThanks for using this tool! Buy me a coffee!☕")
             break 
         elif current_stage == "Remove Profile":
             next_stage = stage_remove_user()
@@ -200,6 +205,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (KeyboardInterrupt, EOFError):
-        print("\nOperation cancelled by user. Exiting.", file=sys.stderr)
+    except (KeyboardInterrupt, EOFError, SelectionAborted):
+        print("\nOperation cancelled by user. Exiting.")
         sys.exit(0)
