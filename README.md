@@ -14,6 +14,9 @@ install with: sudo ./install.sh
 to uninstall
 # 1. Remove the executable command
 sudo rm /usr/local/bin/aws-auth
-
 # 2. Remove the entire application directory
 sudo rm -rf /opt/aws-authentication-tool
+
+
+# check identity
+aws sts get-caller-identity

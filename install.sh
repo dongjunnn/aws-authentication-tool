@@ -3,6 +3,8 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
 # --- Configuration ---
 INSTALL_DIR="/usr/local/bin"
 APP_NAME="aws-auth"
@@ -22,7 +24,7 @@ mkdir -p "$APP_HOME"
 
 # 3. Copy your application files to the application directory.
 echo "Copying application files..."
-cp src/aws-auth.py requirements.txt "$APP_HOME/"
+cp "$SCRIPT_DIR/src/aws-auth.py" "$SCRIPT_DIR/requirements.txt" "$APP_HOME/"
 
 # 4. Create and activate a virtual environment.
 echo "Creating virtual environment..."
