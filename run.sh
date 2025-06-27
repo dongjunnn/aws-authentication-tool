@@ -1,7 +1,7 @@
 #!/bin/bash
-# eval $(./test3.py)
+# eval $(./aws-auth.py)
 
-./test3.py
+./src/aws-auth.py
 
 # export commands saved to this file and then removed
 # source /tmp/aws_env_vars888.sh
