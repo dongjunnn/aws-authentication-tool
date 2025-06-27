@@ -4,15 +4,8 @@
 set -e
 
 # --- Configuration ---
-# The directory where the executable will be placed.
-# /usr/local/bin is a standard location for user-installed executables
-# and is typically in the user's PATH.
 INSTALL_DIR="/usr/local/bin"
-
-# The name of the command you want to use to run your program.
 APP_NAME="aws-auth"
-
-# The directory where your application files and virtual environment will be stored.
 APP_HOME="/opt/aws-authentication-tool"
 
 # --- Main Installation Logic ---
@@ -39,18 +32,47 @@ python3 -m venv "$APP_HOME/venv"
 echo "Installing dependencies..."
 "$APP_HOME/venv/bin/pip" install -r "$APP_HOME/requirements.txt"
 
-# 6. Create a wrapper script in the installation directory.
-# This script is what the user will actually run.
+# 6. Create the main run script inside the application home directory.
+# This contains the logic from your original run.sh, but with absolute paths.
+echo "Creating run script at $APP_HOME/run.sh..."
+cat > "$APP_HOME/run.sh" <<EOL
+#!/bin/bash
+
+# This script is intended to be sourced by the main aws-auth command.
+
+# Execute the python script using the virtual environment.
+# The python script will handle user interaction and create the temp credential file.
+"$APP_HOME/venv/bin/python" "$APP_HOME/aws-auth.py"
+
+# Source the temporary file with credentials if it was created by the python script.
+if [ -f "/tmp/aws_env_vars888.sh" ]; then
+    source /tmp/aws_env_vars888.sh
+    rm /tmp/aws_env_vars888.sh
+    echo "AWS temporary credentials have been set for this shell session."
+fi
+EOL
+
+# 7. Create the main aws-auth command in the installation directory.
+# This command simply sources the run.sh script.
 echo "Creating command at $INSTALL_DIR/$APP_NAME..."
 cat > "$INSTALL_DIR/$APP_NAME" <<EOL
 #!/bin/bash
-# This wrapper script executes your Python script with the correct interpreter
-# from the virtual environment.
-"$APP_HOME/venv/bin/python" "$APP_HOME/aws-auth.py" "\$@"
+#
+# This wrapper script executes your main run script.
+# To set credentials in your current shell, you MUST run this with 'source':
+#
+#   source aws-auth
+#
+source "$APP_HOME/run.sh"
 EOL
 
-# 7. Make the wrapper script executable.
+# 8. Make both new scripts executable.
+chmod +x "$APP_HOME/run.sh"
 chmod +x "$INSTALL_DIR/$APP_NAME"
 
+echo ""
 echo "Installation successful!"
-echo "You can now run the tool from anywhere by typing '$APP_NAME' in your terminal."
+echo "To set your AWS credentials, you must run the tool using the 'source' command:"
+echo ""
+echo "  source $APP_NAME"
+echo ""
