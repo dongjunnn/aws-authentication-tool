@@ -63,7 +63,12 @@ def stage_choose_user():
             os.environ['AWS_ACCESS_KEY_ID'] = credentials['AccessKeyId']
             os.environ['AWS_SECRET_ACCESS_KEY'] = credentials['SecretAccessKey']
             os.environ['AWS_SESSION_TOKEN'] = credentials['SessionToken']
-
+            
+            temp_env_file = "/tmp/aws_env_vars.sh" # Or use tempfile module for robust temp file creation
+            with open(temp_env_file, 'w') as f:
+                f.write(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"\n")
+                f.write(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"\n")
+                f.write(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"\n")
             print(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"")
             print(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"")
             print(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"")
@@ -177,7 +182,7 @@ def main():
         elif current_stage == "Add New Profile":
             next_stage = stage_add_user()
         elif current_stage == 'Quit':
-            print("\nThanks for using this tool! Buy me a coffee! ☕", file=sys.stderr)
+            print("\nThanks for using this tool! Buy me a coffee!☕", file=sys.stderr)
             break 
         elif current_stage == "Remove Profile":
             next_stage = stage_remove_user()
