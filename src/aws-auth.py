@@ -10,6 +10,8 @@ import boto3
 import binascii
 import sys 
 from enquiries.error import SelectionAborted
+import urllib.parse
+
 
 home = expanduser("~")
 config = configparser.ConfigParser()
@@ -18,13 +20,10 @@ config.read(awsCredFile)
 
 # Helper function to handle input prompts correctly when using eval
 def get_input(prompt):
-    # print(prompt, end='')
-    # sys.stderr.flush()
-    # return sys.stdin.readline().strip()
     return input(prompt).strip()
 
 def stage_main_menu():
-    menu = ["Activate Profile (Get Token)", "Add New Profile", "Remove Profile","Quit"]
+    menu = ["Activate Profile (Get Token)", "Add New Profile", "Activate DB", "Remove Profile","Quit"]
     choice = enquiries.choose("Action:", menu)
     if choice == "Activate Profile (Get Token)":
         return "Activate Profile (Get Token)"
@@ -34,6 +33,8 @@ def stage_main_menu():
         return "Quit"
     if choice == "Remove Profile":
         return "Remove Profile"
+    if choice == "Activate DB":
+        return "Activate DB"
 
 def stage_choose_user():
     users = config.sections()
@@ -61,10 +62,6 @@ def stage_choose_user():
             print(green("\nCredentials obtained successfully!"))
             print(f"Expiration: {credentials['Expiration']}")
 
-            # print(f"AccessKeyId: {credentials['AccessKeyId']}")
-            # print("TEST")
-            # print(f"SecretAccessKey: {credentials['SecretAccessKey']}")
-            # print(f"SessionToken: {credentials['SessionToken']}")
             os.environ['AWS_ACCESS_KEY_ID'] = credentials['AccessKeyId']
             os.environ['AWS_SECRET_ACCESS_KEY'] = credentials['SecretAccessKey']
             os.environ['AWS_SESSION_TOKEN'] = credentials['SessionToken']
@@ -78,7 +75,7 @@ def stage_choose_user():
             print(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"")
             print(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"")
                         
-            return "Quit"
+            return "main_menu"
         else:
             return "back"
     except Exception as e:
@@ -175,6 +172,68 @@ def stage_add_user():
     get_input("Press Enter to return to the main menu...")
     return "main_menu"
 
+def stage_activate_db():
+    print(bold("--- Retrieve RDS IAM DB Login Token ---"))
+    # Choose environment (e.g., prod vs nonprod)
+    menu = ["prod", "nonprod"]
+    env_choice = enquiries.choose("Choose environment:", menu)
+
+    # Set RDS endpoints based on choice
+    db_endpoints = {
+        "prod": os.environ.get("RDS_ENDPOINT_PROD"),
+        "nonprod": os.environ.get("RDS_ENDPOINT_NONPROD")
+    }
+
+    hostname = db_endpoints.get(env_choice)
+    if not hostname:
+        print(red("Invalid environment selected."))
+        return "main_menu"
+
+    # Prompt for database username
+    db_user = get_input("Enter database username (e.g. dongjun): ")
+    db_name = get_input("Enter database name (e.g. dev_ums): ")
+    if not db_user:
+        print(red("Database username cannot be empty."))
+        return "main_menu"
+
+    try:
+        print(yellow("Generating RDS IAM token using current AWS session..."))
+        region = os.environ.get("AWS_REGION")
+
+        session = boto3.Session(
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+            region_name=region
+        )
+        rds_client = session.client("rds")
+        token = rds_client.generate_db_auth_token(
+            DBHostname=hostname,
+            Port=5432,
+            DBUsername=db_user,
+            Region=region
+        )
+
+        print(green("\nToken generated successfully!\n"))
+        # print(cyan("Example `psql` connection string:"))
+
+        print("The token is (sslmode=require):" + green(f" {urllib.parse.unquote(token)})"))
+
+        auto_launch = get_input("Do you want to launch psql now? (y/n): ").lower() == 'y'
+        if auto_launch:
+            import subprocess
+            env = os.environ.copy()
+            env['PGPASSWORD'] = token
+            command = f'psql "host={hostname} port=5432 dbname={db_name} user={db_user} sslmode=require"'
+            subprocess.run(command, shell=True, env=env)
+    except Exception as e:
+        print(red("Failed to generate DB token."))
+        print(red(str(e)))
+
+    get_input("Press Enter to return to the main menu...")
+    return "main_menu"
+
+
 def main():
     history = []
     current_stage = "main_menu"
@@ -186,6 +245,8 @@ def main():
             next_stage = stage_choose_user()
         elif current_stage == "Add New Profile":
             next_stage = stage_add_user()
+        elif current_stage == "Activate DB":
+            next_stage = stage_activate_db()
         elif current_stage == 'Quit':
             print("\nThanks for using this tool! Buy me a coffee!☕")
             break 
@@ -201,6 +262,8 @@ def main():
         else:
             history.append(current_stage)
             current_stage = next_stage
+
+
 
 if __name__ == "__main__":
     try:
