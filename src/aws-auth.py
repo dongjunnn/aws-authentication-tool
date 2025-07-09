@@ -10,6 +10,10 @@ import boto3
 import binascii
 import sys 
 from enquiries.error import SelectionAborted
+import urllib.parse
+from datetime import datetime, timezone
+
+
 
 home = expanduser("~")
 config = configparser.ConfigParser()
@@ -18,13 +22,10 @@ config.read(awsCredFile)
 
 # Helper function to handle input prompts correctly when using eval
 def get_input(prompt):
-    # print(prompt, end='')
-    # sys.stderr.flush()
-    # return sys.stdin.readline().strip()
     return input(prompt).strip()
 
 def stage_main_menu():
-    menu = ["Activate Profile (Get Token)", "Add New Profile", "Remove Profile","Quit"]
+    menu = ["Activate Profile (Get Token)", "Activate DB", "Rotate Keys", "Add New Profile", "Remove Profile","Quit"]
     choice = enquiries.choose("Action:", menu)
     if choice == "Activate Profile (Get Token)":
         return "Activate Profile (Get Token)"
@@ -34,13 +35,77 @@ def stage_main_menu():
         return "Quit"
     if choice == "Remove Profile":
         return "Remove Profile"
+    if choice == "Activate DB":
+        return "Activate DB"
+    if choice == "Rotate Keys":
+        return "Rotate Keys"
+
+
+def stage_rotate_keys():
+    users = config.sections()
+
+    if not users:
+        print(red("No users found. Please add a user first."))
+        return "main_menu"
+
+    choice = enquiries.choose("Choose a user to rotate keys for:", users)
+    if not choice:
+        return "main_menu"
+
+    try:
+        print(yellow(f"Rotating keys for: {choice}"))
+
+        # Get the current keys from config
+        current_key_id = config[choice]['aws_access_key_id']
+
+        # Use environment variables (set in stage_choose_user) for session
+        session = boto3.Session(
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN")
+        )
+        iam_client = session.client('iam')
+        sts_client = session.client('sts')
+
+        # Get current username
+        identity = sts_client.get_caller_identity()
+        arn = identity['Arn']
+        current_user = arn.split('/')[-1]
+
+        # Create new access key
+        print("Creating new access key...")
+        new_key = iam_client.create_access_key(UserName=current_user)['AccessKey']
+        new_access_key = new_key['AccessKeyId']
+        new_secret_key = new_key['SecretAccessKey']
+
+        print(green("New access key created."))
+
+        # Deactivate and delete old access key
+        print("Deactivating and deleting old key...")
+        iam_client.update_access_key(UserName=current_user, AccessKeyId=current_key_id, Status='Inactive')
+        iam_client.delete_access_key(UserName=current_user, AccessKeyId=current_key_id)
+
+        print(green("Old key deactivated and deleted."))
+
+        # Update config
+        config[choice]['aws_access_key_id'] = new_access_key
+        config[choice]['aws_secret_access_key'] = new_secret_key
+        with open(awsCredFile, 'w') as configfile:
+            config.write(configfile)
+
+        print(green(f"\nSuccess! New keys saved for profile '{choice}' in {awsCredFile}"))
+
+    except Exception as e:
+        print(red(f"\nFailed to rotate keys: {e}"))
+
+    return "main_menu"
 
 def stage_choose_user():
     users = config.sections()
     if not users:
         print(red("No users found. Please add a user first."))
         return "main_menu"
-    
+
     choice = enquiries.choose("Choose a user:", users)
     try:
         if choice:
@@ -48,10 +113,38 @@ def stage_choose_user():
             mfa_serial_arn = config[choice]['mfa_serial_arn']
             token = config[choice]['mfa_token']
             totp = pyotp.TOTP(token).now()
-            
+
             print("Requesting temporary session token from AWS...")
             session = boto3.Session(profile_name=choice)
             sts_client = session.client('sts')
+
+            iam_client = session.client('iam')
+            identity = sts_client.get_caller_identity()
+            arn = identity['Arn']  # arn:aws:iam::acct:user/dongjun
+            current_user = arn.split('/')[-1]
+            access_keys = iam_client.list_access_keys(UserName=current_user)['AccessKeyMetadata']
+
+            # Find matching key ID from config
+            current_key_id = config[choice]['aws_access_key_id']
+
+            # Find the key creation date
+            key_info = next((key for key in access_keys if key['AccessKeyId'] == current_key_id), None)
+
+            if key_info:
+                created = key_info['CreateDate']
+                now = datetime.now(timezone.utc)
+                age_days = (now - created).days
+
+                if age_days >= 90:
+                    print(red(f"\n Access key is {age_days} days old. Rotation required. Login blocked."))
+                    return "main_menu"
+                elif age_days >= 80:
+                    print(red(f"\n Warning: Access key is {age_days} days old. Please rotate soon!"))
+                else:
+                    print(green(f"\n Access key is {age_days} days old."))
+            else:
+                print(yellow("\n Could not find metadata for the current access key."))
+
             response = sts_client.get_session_token(
                 SerialNumber=mfa_serial_arn,
                 TokenCode=totp
@@ -61,14 +154,10 @@ def stage_choose_user():
             print(green("\nCredentials obtained successfully!"))
             print(f"Expiration: {credentials['Expiration']}")
 
-            # print(f"AccessKeyId: {credentials['AccessKeyId']}")
-            # print("TEST")
-            # print(f"SecretAccessKey: {credentials['SecretAccessKey']}")
-            # print(f"SessionToken: {credentials['SessionToken']}")
             os.environ['AWS_ACCESS_KEY_ID'] = credentials['AccessKeyId']
             os.environ['AWS_SECRET_ACCESS_KEY'] = credentials['SecretAccessKey']
             os.environ['AWS_SESSION_TOKEN'] = credentials['SessionToken']
-            
+
             temp_env_file = "/tmp/aws_env_vars888.sh" # Or use tempfile module for robust temp file creation
             with open(temp_env_file, 'w') as f:
                 f.write(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"\n")
@@ -77,8 +166,8 @@ def stage_choose_user():
             print(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"")
             print(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"")
             print(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"")
-                        
-            return "Quit"
+
+            return "main_menu"
         else:
             return "back"
     except Exception as e:
@@ -175,6 +264,68 @@ def stage_add_user():
     get_input("Press Enter to return to the main menu...")
     return "main_menu"
 
+def stage_activate_db():
+    print(bold("--- Retrieve RDS IAM DB Login Token ---"))
+    # Choose environment (e.g., prod vs nonprod)
+    menu = ["prod", "nonprod"]
+    env_choice = enquiries.choose("Choose environment:", menu)
+
+    # Set RDS endpoints based on choice
+    db_endpoints = {
+        "prod": os.environ.get("RDS_ENDPOINT_PROD"),
+        "nonprod": os.environ.get("RDS_ENDPOINT_NONPROD")
+    }
+
+    hostname = db_endpoints.get(env_choice)
+    if not hostname:
+        print(red("Invalid environment selected."))
+        return "main_menu"
+
+    # Prompt for database username
+    db_user = get_input("Enter database username (e.g. dongjun): ")
+    db_name = get_input("Enter database name (e.g. dev_ums): ")
+    if not db_user:
+        print(red("Database username cannot be empty."))
+        return "main_menu"
+
+    try:
+        print(yellow("Generating RDS IAM token using current AWS session..."))
+        region = os.environ.get("AWS_REGION")
+
+        session = boto3.Session(
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            aws_session_token=os.environ.get("AWS_SESSION_TOKEN"),
+            region_name=region
+        )
+        rds_client = session.client("rds")
+        token = rds_client.generate_db_auth_token(
+            DBHostname=hostname,
+            Port=5432,
+            DBUsername=db_user,
+            Region=region
+        )
+
+        print(green("\nToken generated successfully!\n"))
+        # print(cyan("Example `psql` connection string:"))
+
+        print("The token is (sslmode=require):" + green(f" {urllib.parse.unquote(token)})"))
+
+        auto_launch = get_input("Do you want to launch psql now? (y/n): ").lower() == 'y'
+        if auto_launch:
+            import subprocess
+            env = os.environ.copy()
+            env['PGPASSWORD'] = token
+            command = f'psql "host={hostname} port=5432 dbname={db_name} user={db_user} sslmode=require"'
+            subprocess.run(command, shell=True, env=env)
+    except Exception as e:
+        print(red("Failed to generate DB token."))
+        print(red(str(e)))
+
+    get_input("Press Enter to return to the main menu...")
+    return "main_menu"
+
+
 def main():
     history = []
     current_stage = "main_menu"
@@ -186,6 +337,10 @@ def main():
             next_stage = stage_choose_user()
         elif current_stage == "Add New Profile":
             next_stage = stage_add_user()
+        elif current_stage == "Activate DB":
+            next_stage = stage_activate_db()
+        elif current_stage == "Rotate Keys":
+            next_stage = stage_rotate_keys()
         elif current_stage == 'Quit':
             print("\nThanks for using this tool! Buy me a coffee!☕")
             break 
