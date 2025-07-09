@@ -35,18 +35,13 @@ echo "Installing dependencies..."
 "$APP_HOME/venv/bin/pip" install -r "$APP_HOME/requirements.txt"
 
 # 6. Create the main run script inside the application home directory.
-# This contains the logic from your original run.sh, but with absolute paths.
 echo "Creating run script at $APP_HOME/run.sh..."
 cat > "$APP_HOME/run.sh" <<EOL
 #!/bin/bash
 
 # This script is intended to be sourced by the main aws-auth command.
-
-# Execute the python script using the virtual environment.
-# The python script will handle user interaction and create the temp credential file.
 "$APP_HOME/venv/bin/python" "$APP_HOME/aws-auth.py"
 
-# Source the temporary file with credentials if it was created by the python script.
 if [ -f "/tmp/aws_env_vars888.sh" ]; then
     source /tmp/aws_env_vars888.sh
     rm /tmp/aws_env_vars888.sh
@@ -55,16 +50,10 @@ fi
 EOL
 
 # 7. Create the main aws-auth command in the installation directory.
-# This command simply sources the run.sh script.
 echo "Creating command at $INSTALL_DIR/$APP_NAME..."
 cat > "$INSTALL_DIR/$APP_NAME" <<EOL
 #!/bin/bash
-#
-# This wrapper script executes your main run script.
-# To set credentials in your current shell, you MUST run this with 'source':
-#
-#   source aws-auth
-#
+# Wrapper script to be sourced, not executed
 source "$APP_HOME/run.sh"
 EOL
 
@@ -78,3 +67,26 @@ echo "To set your AWS credentials, you must run the tool using the 'source' comm
 echo ""
 echo "  source $APP_NAME"
 echo ""
+
+# 9. Add aws-auth shell function to user's ~/.bashrc (if not already present)
+BASHRC="/home/$SUDO_USER/.bashrc"
+FUNC_DECL='aws-auth() { source /usr/local/bin/aws-auth; }'
+
+if ! grep -Fxq "$FUNC_DECL" "$BASHRC"; then
+    echo "" >> "$BASHRC"
+    echo "# AWS auth helper function" >> "$BASHRC"
+    echo "$FUNC_DECL" >> "$BASHRC"
+    echo "Shell function added to $BASHRC. You can now just run 'aws-auth'."
+else
+    echo "Shell function already present in $BASHRC. Skipping."
+fi
+
+# 10. Final instructions
+echo ""
+echo "============================================================"
+echo "IMPORTANT: To activate the function, run this in your shell:"
+echo "  source ~/.bashrc"
+echo "  hash -r"
+echo "Then run:"
+echo "  aws-auth"
+echo "============================================================"
