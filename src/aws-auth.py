@@ -14,15 +14,16 @@ import urllib.parse
 from datetime import datetime, timezone
 
 
-
 home = expanduser("~")
 config = configparser.ConfigParser()
 awsCredFile = '%s/.aws/credentials' % (home)
 config.read(awsCredFile)
 
+
 # Helper function to handle input prompts correctly when using eval
 def get_input(prompt):
     return input(prompt).strip()
+
 
 def test_rds_token_connection(hostname, db_user, db_name, token):
     import subprocess
@@ -30,7 +31,7 @@ def test_rds_token_connection(hostname, db_user, db_name, token):
     env = os.environ.copy()
     env['PGPASSWORD'] = token
 
-    print(yellow("\nValidating RDS IAM token by attempting a connection..."))
+    print(yellow("Validating RDS IAM token by attempting a connection..."))
 
     try:
         result = subprocess.run(command, shell=True, env=env, capture_output=True, text=True)
@@ -44,7 +45,6 @@ def test_rds_token_connection(hostname, db_user, db_name, token):
     except Exception as e:
         print(red(f"Exception occurred while testing token: {e}"))
         return False
-
 
 
 def stage_main_menu():
@@ -78,10 +78,8 @@ def stage_rotate_keys():
     try:
         print(yellow(f"Rotating keys for: {choice}"))
 
-        # Get the current keys from config
         current_key_id = config[choice]['aws_access_key_id']
 
-        # Use environment variables (set in stage_choose_user) for session
         session = boto3.Session(
             aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
@@ -90,38 +88,35 @@ def stage_rotate_keys():
         iam_client = session.client('iam')
         sts_client = session.client('sts')
 
-        # Get current username
         identity = sts_client.get_caller_identity()
         arn = identity['Arn']
         current_user = arn.split('/')[-1]
 
-        # Create new access key
+        # Step 1: Delete old key FIRST to stay within the 2-key limit
+        print("Deleting old access key...")
+        iam_client.delete_access_key(UserName=current_user, AccessKeyId=current_key_id)
+        print(green("Old key deleted."))
+
+        # Step 2: Create new access key
         print("Creating new access key...")
         new_key = iam_client.create_access_key(UserName=current_user)['AccessKey']
         new_access_key = new_key['AccessKeyId']
         new_secret_key = new_key['SecretAccessKey']
-
         print(green("New access key created."))
 
-        # Deactivate and delete old access key
-        print("Deactivating and deleting old key...")
-        iam_client.update_access_key(UserName=current_user, AccessKeyId=current_key_id, Status='Inactive')
-        iam_client.delete_access_key(UserName=current_user, AccessKeyId=current_key_id)
-
-        print(green("Old key deactivated and deleted."))
-
-        # Update config
+        # Step 3: Update ~/.aws/credentials
         config[choice]['aws_access_key_id'] = new_access_key
         config[choice]['aws_secret_access_key'] = new_secret_key
         with open(awsCredFile, 'w') as configfile:
             config.write(configfile)
 
-        print(green(f"\nSuccess! New keys saved for profile '{choice}' in {awsCredFile}"))
+        print(green(f"Success! New keys saved for profile '{choice}' in {awsCredFile}"))
 
     except Exception as e:
-        print(red(f"\nFailed to rotate keys: {e}"))
+        print(red(f"Failed to rotate keys: {e}"))
 
     return "main_menu"
+
 
 def stage_choose_user():
     users = config.sections()
@@ -159,14 +154,14 @@ def stage_choose_user():
                 age_days = (now - created).days
 
                 if age_days >= 90:
-                    print(red(f"\nAccess key is {age_days} days old. Rotation required. Login blocked."))
+                    print(red(f"Access key is {age_days} days old. Rotation required. Login blocked."))
                     return "main_menu"
                 elif age_days >= 80:
-                    print(red(f"\n Warning: Access key is {age_days} days old. Please rotate soon!"))
+                    print(red(f" Warning: Access key is {age_days} days old. Please rotate soon!"))
                 else:
-                    print(green(f"\n Access key is {age_days} days old."))
+                    print(green(f"Access key is {age_days} days old."))
             else:
-                print(yellow("\n Could not find metadata for the current access key."))
+                print(yellow(" Could not find metadata for the current access key."))
 
             response = sts_client.get_session_token(
                 SerialNumber=mfa_serial_arn,
@@ -174,7 +169,7 @@ def stage_choose_user():
             )
             credentials = response['Credentials']
 
-            print(green("\nCredentials obtained successfully!"))
+            print(green("Credentials obtained successfully!"))
             print(f"Expiration: {credentials['Expiration']}")
 
             os.environ['AWS_ACCESS_KEY_ID'] = credentials['AccessKeyId']
@@ -186,7 +181,6 @@ def stage_choose_user():
                 f.write(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"\n")
                 f.write(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"\n")
                 f.write(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"\n")
-            print(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"")
             print(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"")
             print(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"")
 
@@ -194,7 +188,7 @@ def stage_choose_user():
         else:
             return "back"
     except Exception as e:
-        print(red("\nAn error occurred!"))
+        print(red("An error occurred!"))
         print(red(f"Error: {e}"))
         return "main_menu"
     
@@ -212,15 +206,15 @@ def stage_remove_user():
             try:
                 with open(awsCredFile, 'w') as configfile:
                     config.write(configfile)
-                print(green(f"\nSuccess! Profile '{choice}' was removed from {awsCredFile}"))
+                print(green(f"Success! Profile '{choice}' was removed from {awsCredFile}"))
             except Exception as e:
-                print(red(f"\nError writing to credentials file: {e}"))
+                print(red(f"Error writing to credentials file: {e}"))
         else:
             print("Removal cancelled.")
     return "back"
 
 def validate_credentials_directly(access_key, secret_key, mfa_serial=None, mfa_token_secret=None):
-    print(cyan("\nValidating credentials with AWS before saving..."))
+    print(cyan("Validating credentials with AWS before saving..."))
     try:
         if not mfa_serial or not mfa_token_secret:
             print(red("MFA Serial and Token are required for validation."))
@@ -244,10 +238,10 @@ def validate_credentials_directly(access_key, secret_key, mfa_serial=None, mfa_t
         return True
 
     except binascii.Error:
-        print(red("\nValidation Failed: The MFA Token Secret is not a valid Base32 string."))
+        print(red("Validation Failed: The MFA Token Secret is not a valid Base32 string."))
         return False
     except Exception as e:
-        print(red(f"\nValidation Failed: {e}"))
+        print(red(f"Validation Failed: {e}"))
         return False
     
 def stage_add_user():
@@ -255,7 +249,7 @@ def stage_add_user():
     
     profile_name = get_input("Enter a unique name for this profile: ")
     if not profile_name:
-        print(red("\nProfile name cannot be empty."))
+        print(red("Profile name cannot be empty."))
         get_input("Press Enter to return.")
         return "main_menu"
 
@@ -267,7 +261,7 @@ def stage_add_user():
         mfa_token = get_input("Enter MFA Token Secret: ")
     
     if not validate_credentials_directly(access_key, secret_key, mfa_serial, mfa_token):
-        print(red("\nCredentials could not be validated and were not saved."))
+        print(red("Credentials could not be validated and were not saved."))
         get_input("Press Enter to return to the main menu...")
         return "main_menu"
         
@@ -280,9 +274,9 @@ def stage_add_user():
     try:
         with open(awsCredFile, 'w') as configfile:
             config.write(configfile)
-        print(green(f"\nSuccess! Profile '{profile_name}' was added to {awsCredFile}"))
+        print(green(f"Success! Profile '{profile_name}' was added to {awsCredFile}"))
     except Exception as e:
-        print(red(f"\nError writing to credentials file: {e}"))
+        print(red(f"Error writing to credentials file: {e}"))
 
     get_input("Press Enter to return to the main menu...")
     return "main_menu"
@@ -329,7 +323,7 @@ def stage_activate_db():
             Region=region
         )
 
-        print(green("\nToken generated successfully!\n"))
+        print(green("Token generated successfully!"))
         # print(cyan("Example `psql` connection string:"))
 
         print("The token is (sslmode=require):" + green(f" {urllib.parse.unquote(token)}"))
@@ -371,7 +365,7 @@ def main():
         elif current_stage == "Rotate Keys":
             next_stage = stage_rotate_keys()
         elif current_stage == 'Quit':
-            print("\nThanks for using this tool! Buy me a coffee!☕")
+            print("Thanks for using this tool! Buy me a coffee!☕")
             break 
         elif current_stage == "Remove Profile":
             next_stage = stage_remove_user()
@@ -390,5 +384,5 @@ if __name__ == "__main__":
     try:
         main()
     except (KeyboardInterrupt, EOFError, SelectionAborted):
-        print("\nOperation cancelled by user. Exiting.")
+        print("Operation cancelled by user. Exiting.")
         sys.exit(0)
