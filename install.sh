@@ -63,9 +63,9 @@ chmod +x "$INSTALL_DIR/$APP_NAME"
 
 echo ""
 echo "Installation successful!"
-echo "To set your AWS credentials, you must run the tool using the 'source' command:"
+echo "To set your AWS credentials, you must run the tool using the 'aws-auth' command:"
 echo ""
-echo "  source $APP_NAME"
+echo "  $APP_NAME"
 echo ""
 
 # 9. Add aws-auth shell function to user's ~/.bashrc (if not already present)
@@ -81,12 +81,4 @@ else
     echo "Shell function already present in $BASHRC. Skipping."
 fi
 
-# 10. Final instructions
-echo ""
-echo "============================================================"
-echo "IMPORTANT: To activate the function, run this in your shell:"
-echo "  source ~/.bashrc"
-echo "  hash -r"
-echo "Then run:"
-echo "  aws-auth"
-echo "============================================================"
+
