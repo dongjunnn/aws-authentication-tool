@@ -24,6 +24,29 @@ config.read(awsCredFile)
 def get_input(prompt):
     return input(prompt).strip()
 
+def test_rds_token_connection(hostname, db_user, db_name, token):
+    import subprocess
+    command = f'psql "host={hostname} port=5432 dbname={db_name} user={db_user} sslmode=require" -c \'SELECT 1;\''
+    env = os.environ.copy()
+    env['PGPASSWORD'] = token
+
+    print(yellow("\nValidating RDS IAM token by attempting a connection..."))
+
+    try:
+        result = subprocess.run(command, shell=True, env=env, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(green("Token is valid! Successfully connected to the database."))
+            return True
+        else:
+            print(red("Token validation failed. Could not connect to database."))
+            print(red(result.stderr.strip()))
+            return False
+    except Exception as e:
+        print(red(f"Exception occurred while testing token: {e}"))
+        return False
+
+
+
 def stage_main_menu():
     menu = ["Activate Profile (Get Token)", "Activate DB", "Rotate Keys", "Add New Profile", "Remove Profile","Quit"]
     choice = enquiries.choose("Action:", menu)
@@ -136,7 +159,7 @@ def stage_choose_user():
                 age_days = (now - created).days
 
                 if age_days >= 90:
-                    print(red(f"\n Access key is {age_days} days old. Rotation required. Login blocked."))
+                    print(red(f"\nAccess key is {age_days} days old. Rotation required. Login blocked."))
                     return "main_menu"
                 elif age_days >= 80:
                     print(red(f"\n Warning: Access key is {age_days} days old. Please rotate soon!"))
@@ -309,7 +332,13 @@ def stage_activate_db():
         print(green("\nToken generated successfully!\n"))
         # print(cyan("Example `psql` connection string:"))
 
-        print("The token is (sslmode=require):" + green(f" {urllib.parse.unquote(token)})"))
+        print("The token is (sslmode=require):" + green(f" {urllib.parse.unquote(token)}"))
+
+        # Test the token before offering to launch psql
+        if not test_rds_token_connection(hostname, db_user, db_name, token):
+            print(red("Skipping auto-launch since the token failed validation."))
+            get_input("Press Enter to return to the main menu...")
+            return "main_menu"
 
         auto_launch = get_input("Do you want to launch psql now? (y/n): ").lower() == 'y'
         if auto_launch:
