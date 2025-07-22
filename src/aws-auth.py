@@ -8,10 +8,11 @@ from os.path import expanduser
 from curtsies.fmtfuncs import red, bold, green, on_blue, yellow, cyan
 import boto3
 import binascii
-import sys 
+import sys
 from enquiries.error import SelectionAborted
 import urllib.parse
 from datetime import datetime, timezone
+import time
 
 
 home = expanduser("~")
@@ -112,6 +113,52 @@ def stage_rotate_keys():
 
         print(green(f"Success! New keys saved for profile '{choice}' in {awsCredFile}"))
 
+        print(yellow("Waiting for 10 seconds for new key to propagate..."))
+        time.sleep(10)
+
+        # Automatically log in using the newly rotated key
+        print(yellow("Verifying identity and requesting session token with new key..."))
+
+        os.environ.pop("AWS_ACCESS_KEY_ID", None)
+        os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
+        os.environ.pop("AWS_SESSION_TOKEN", None)
+
+
+        # First, verify identity
+        temp_session = boto3.Session(
+            aws_access_key_id=new_access_key,
+            aws_secret_access_key=new_secret_key
+        )
+        sts_temp = temp_session.client('sts')
+
+        identity = sts_temp.get_caller_identity()
+        print(green(f"Identity confirmed: {identity['Arn']}"))
+
+        # Then generate TOTP and request session token
+        totp = pyotp.TOTP(config[choice]['mfa_token']).now()
+        response = sts_temp.get_session_token(
+            SerialNumber=config[choice]['mfa_serial_arn'],
+            TokenCode=totp
+        )
+        credentials = response['Credentials']
+
+        # Export to env
+        os.environ['AWS_ACCESS_KEY_ID'] = credentials['AccessKeyId']
+        os.environ['AWS_SECRET_ACCESS_KEY'] = credentials['SecretAccessKey']
+        os.environ['AWS_SESSION_TOKEN'] = credentials['SessionToken']
+
+        # Optionally dump to temp file for shell source
+        temp_env_file = "/tmp/aws_env_vars888.sh"
+        with open(temp_env_file, 'w') as f:
+            f.write(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"\n")
+            f.write(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"\n")
+            f.write(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"\n")
+
+        print(green("Logged in with temporary session credentials!"))
+        print(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"")
+        print(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"")
+        print(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"")
+
     except Exception as e:
         print(red(f"Failed to rotate keys: {e}"))
 
@@ -181,6 +228,7 @@ def stage_choose_user():
                 f.write(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"\n")
                 f.write(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"\n")
                 f.write(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"\n")
+            print(f"export AWS_ACCESS_KEY_ID=\"{credentials['AccessKeyId']}\"")
             print(f"export AWS_SECRET_ACCESS_KEY=\"{credentials['SecretAccessKey']}\"")
             print(f"export AWS_SESSION_TOKEN=\"{credentials['SessionToken']}\"")
 
@@ -191,13 +239,13 @@ def stage_choose_user():
         print(red("An error occurred!"))
         print(red(f"Error: {e}"))
         return "main_menu"
-    
+
 def stage_remove_user():
     users = config.sections()
     if not users:
         print("No users found. Please add a user first.")
         return "back"
-    
+
     choice = enquiries.choose("Choose a user to remove:", users)
     if choice:
         confirm = get_input(f"Are you sure you want to remove the profile '{choice}'? (y/n): ")
@@ -222,7 +270,7 @@ def validate_credentials_directly(access_key, secret_key, mfa_serial=None, mfa_t
 
         pyotp.TOTP(mfa_token_secret).now()
         totp = pyotp.TOTP(mfa_token_secret).now()
-        
+
         print("MFA secret key format is valid. Now checking with AWS...")
         sts_client = boto3.client(
             'sts',
@@ -232,7 +280,7 @@ def validate_credentials_directly(access_key, secret_key, mfa_serial=None, mfa_t
         sts_client.get_session_token(
             SerialNumber=mfa_serial,
             TokenCode=totp,
-            DurationSeconds=900 
+            DurationSeconds=900
         )
         print(green("MFA credentials and token are valid!"))
         return True
@@ -243,10 +291,10 @@ def validate_credentials_directly(access_key, secret_key, mfa_serial=None, mfa_t
     except Exception as e:
         print(red(f"Validation Failed: {e}"))
         return False
-    
+
 def stage_add_user():
     print("--- Add New AWS Profile ---")
-    
+
     profile_name = get_input("Enter a unique name for this profile: ")
     if not profile_name:
         print(red("Profile name cannot be empty."))
@@ -259,12 +307,12 @@ def stage_add_user():
     mfa_token = ""
     if mfa_serial:
         mfa_token = get_input("Enter MFA Token Secret: ")
-    
+
     if not validate_credentials_directly(access_key, secret_key, mfa_serial, mfa_token):
         print(red("Credentials could not be validated and were not saved."))
         get_input("Press Enter to return to the main menu...")
         return "main_menu"
-        
+
     config.add_section(profile_name)
     config.set(profile_name, 'aws_access_key_id', access_key)
     config.set(profile_name, 'aws_secret_access_key', secret_key)
@@ -366,16 +414,16 @@ def main():
             next_stage = stage_rotate_keys()
         elif current_stage == 'Quit':
             print("Thanks for using this tool! Buy me a coffee!☕")
-            break 
+            break
         elif current_stage == "Remove Profile":
             next_stage = stage_remove_user()
-        
+
 
         if next_stage == 'back':
-            if history: 
+            if history:
                 current_stage = history.pop()
             else:
-                current_stage = "main_menu" 
+                current_stage = "main_menu"
         else:
             history.append(current_stage)
             current_stage = next_stage
