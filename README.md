@@ -166,5 +166,3 @@ All rights to the tool, including the source code and associated intellectual pr
 ## Disclaimer
 
 This tool manages sensitive credentials, including IAM access keys. While it is designed to be safe, use it at your own risk. The author and Kabam Robotics are not responsible for any security incidents or data loss that may result from its use. Always review scripts and understand what they do before executing them.
-
-```
