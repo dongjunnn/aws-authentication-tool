@@ -374,7 +374,7 @@ def stage_activate_db():
         print(green("Token generated successfully!"))
         # print(cyan("Example `psql` connection string:"))
 
-        print("The token is (sslmode=require):" + green(f" {urllib.parse.unquote(token)}"))
+        print("The token is (sslmode=require):" + green(f" {token}"))
 
         # Test the token before offering to launch psql
         if not test_rds_token_connection(hostname, db_user, db_name, token):
